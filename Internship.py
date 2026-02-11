@@ -47,9 +47,16 @@ def lancer_recherche(criteres, sites):
                     annonces = soup.find_all('h3')
                     st.write(f"🏷️ Nombre de balises <h3> trouvées : {len(annonces)}")
                     
-                    with st.expander("Voir les 500 premiers caractères du code source brut (Sert à repérer les protections Anti-Bot)"):
-                        st.code(reponse.text[:500])
+                    # NOUVEAU MOUCHARD : On inspecte la première annonce trouvée
+                    if len(annonces) > 0:
+                        premiere_annonce = annonces[0]
+                        with st.expander("🧐 Cliquez ici pour voir le code HTML de la 1ère annonce trouvée !"):
+                            st.write("Code de la balise `<h3>` (Le titre) :")
+                            st.code(str(premiere_annonce))
+                            st.write("Code du 'Parent' (La boîte qui contient le `<h3>` et probablement le lien `<a>`) :")
+                            st.code(str(premiere_annonce.parent))
 
+                    # La boucle actuelle qui cherche le lien (qui ne fonctionne pas pour l'instant)
                     for annonce in annonces:
                         lien_tag = annonce.find('a')
                         if lien_tag and 'href' in lien_tag.attrs:
@@ -92,7 +99,6 @@ with st.sidebar:
     if st.button("🚀 Rafraîchir les offres", use_container_width=True, type="primary"):
         criteres = {"lieu": lieu, "rayon": rayon, "duree": duree, "secteur": secteur}
         
-        # Lancement de la recherche au clic
         st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
             
         if not st.session_state.resultats.empty:
