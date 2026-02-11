@@ -62,27 +62,22 @@ def lancer_recherche(criteres, sites):
                             
                             aria_label = lien_tag.get('aria-label', '').lower()
                             titre_brut = annonce.text.lower()
-                            texte_annonce = aria_label + " " + titre_brut
                             
                             # CORRECTIF 2 : Le filtre intraitable Anti-CDI
-                            if 'stage' not in texte_annonce and 'intern' not in texte_annonce:
+                            if 'stage' not in aria_label and 'intern' not in aria_label and 'stage' not in titre_brut and 'intern' not in titre_brut:
                                 continue 
                             
-                            # CORRECTIF 3 : Le filtre d'exclusion intelligent
+                            # CORRECTIF 3 : Le filtre d'exclusion des autres durées
+                            # On vérifie si l'un des mots bannis est présent dans le texte
                             contient_autre_duree = False
                             for mot_banni in mots_a_bannir:
-                                if mot_banni in texte_annonce:
+                                if mot_banni in aria_label or mot_banni in titre_brut:
                                     contient_autre_duree = True
-                                    break 
+                                    break # Dès qu'on trouve un mot banni, on arrête de chercher
                             
-                            # NOUVEAUTÉ : Si on trouve une autre durée, on vérifie si la nôtre y est AUSSI
+                            # Si l'annonce mentionne une autre durée, on la rejette
                             if contient_autre_duree:
-                                if duree_choisie != "peu importe" and duree_choisie in texte_annonce:
-                                    # Les deux durées sont présentes (ex: "Stage 4 à 6 mois"), on pardonne !
-                                    pass
-                                else:
-                                    # Seulement la mauvaise durée est présente, on rejette l'annonce
-                                    continue
+                                continue
                             
                             p_titre = annonce.find('p', class_=lambda c: c and 'tw-typo-l' in c)
                             p_entreprise = annonce.find('p', class_=lambda c: c and 'tw-typo-s' in c)
@@ -127,7 +122,7 @@ with st.sidebar:
     if st.button("🚀 Rafraîchir les offres", use_container_width=True, type="primary"):
         criteres = {"lieu": lieu, "rayon": rayon, "duree": duree, "secteur": secteur}
         
-        with st.spinner("Recherche et filtrage intelligent en cours... 🕵️‍♂️"):
+        with st.spinner("Recherche et filtrage strict en cours... 🕵️‍♂️"):
             st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
             
         if not st.session_state.resultats.empty:
