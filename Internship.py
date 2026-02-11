@@ -18,8 +18,8 @@ if 'sites_cibles' not in st.session_state:
 if 'resultats' not in st.session_state:
     st.session_state.resultats = pd.DataFrame()
 
-# --- LA FONCTION DE RECHERCHE ---
-def lancer_recherche(criteres, sites):
+# --- LA FONCTION DE RECHERCHE PROFONDE ---
+def lancer_recherche(criteres, sites, zone_statut):
     offres_trouvees = []
     sites_actifs = sites[sites['Actif'] == True]['Site'].tolist()
     
@@ -27,11 +27,9 @@ def lancer_recherche(criteres, sites):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
-    # Liste étendue pour attraper toutes les variations d'écriture
     toutes_durees_possibles = ["2 mois", "2mois", "4 mois", "4mois", "6 mois", "6mois", "césure", "cesure"]
     duree_choisie = criteres['duree'].lower()
     
-    # Création de la liste noire en excluant la durée choisie (et sa version sans espace)
     mots_a_bannir = []
     if duree_choisie != "peu importe":
         duree_sans_espace = duree_choisie.replace(" ", "")
@@ -41,14 +39,14 @@ def lancer_recherche(criteres, sites):
 
     for site in sites_actifs:
         if site == "HelloWork":
-            # On force le mot "Stage" et la durée directement dans les mots-clés
+            zone_statut.update(label=f"Recherche de la liste des offres sur {site}...", state="running")
+            
             mots_cles = f"Stage {criteres['secteur']}"
             if criteres['duree'] != "Peu importe":
                 mots_cles += f" {criteres['duree']}"
                 
             mot_cle_url = mots_cles.replace(' ', '+')
             lieu_url = criteres['lieu'].replace(' ', '+')
-            
             url = f"https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot_cle_url}&l={lieu_url}&ray={criteres['rayon']}"
             
             try:
@@ -57,48 +55,62 @@ def lancer_recherche(criteres, sites):
                 if reponse.status_code == 200:
                     soup = BeautifulSoup(reponse.text, 'html.parser')
                     annonces = soup.find_all('h3')
+                    
+                    total_annonces = len(annonces)
+                    annonces_valides = 0
 
-                    for annonce in annonces:
+                    for i, annonce in enumerate(annonces):
+                        # Mise à jour visuelle pour l'utilisateur
+                        zone_statut.update(label=f"Analyse approfondie : offre {i+1} sur {total_annonces}...", state="running")
+                        
                         lien_tag = annonce.parent
                         
                         if lien_tag.name == 'a' and 'href' in lien_tag.attrs:
                             
-                            # CORRECTIF MAJEUR : On lit MAINTENANT tout le texte de la carte d'annonce !
-                            # get_text(separator=' ') permet d'éviter que deux mots se collent
+                            # 1. Analyse de surface (pour éliminer vite les CDI évidents)
                             texte_carte = lien_tag.get_text(separator=' ').lower()
                             aria_label = lien_tag.get('aria-label', '').lower()
+                            texte_surface = aria_label + " " + texte_carte
                             
-                            # On fusionne tout le texte visible et caché pour le scan
-                            texte_complet_annonce = aria_label + " " + texte_carte
-                            
-                            # Filtre Anti-CDI
-                            if 'stage' not in texte_complet_annonce and 'intern' not in texte_complet_annonce:
+                            if 'stage' not in texte_surface and 'intern' not in texte_surface:
                                 continue 
                             
-                            # Filtre d'exclusion des autres durées
-                            contient_autre_duree = False
-                            for mot_banni in mots_a_bannir:
-                                if mot_banni in texte_complet_annonce:
-                                    contient_autre_duree = True
-                                    break 
+                            lien_complet = "https://www.hellowork.com" + lien_tag['href']
                             
-                            # Règle de tolérance : Si une mauvaise durée est trouvée, on vérifie si la bonne y est aussi
-                            if contient_autre_duree:
-                                if duree_choisie != "peu importe" and (duree_choisie in texte_complet_annonce or duree_choisie.replace(" ", "") in texte_complet_annonce):
-                                    # Les deux sont là (ex: "Stage 2 à 6 mois"), on garde !
-                                    pass
-                                else:
-                                    # C'est bel et bien une mauvaise durée, on rejette.
-                                    continue
+                            # 2. ANALYSE PROFONDE (Deep Scraping)
+                            try:
+                                # On fait une petite pause de 0.2s pour ne pas se faire bloquer par le site
+                                time.sleep(0.2)
+                                reponse_detail = requests.get(lien_complet, headers=headers, timeout=5)
+                                
+                                if reponse_detail.status_code == 200:
+                                    soup_detail = BeautifulSoup(reponse_detail.text, 'html.parser')
+                                    # On récupère tout le texte de la page de l'offre
+                                    texte_profond = soup_detail.get_text(separator=' ').lower()
+                                    
+                                    # Filtre d'exclusion sur le texte de la page ENTIÈRE
+                                    contient_autre_duree = False
+                                    for mot_banni in mots_a_bannir:
+                                        if mot_banni in texte_profond:
+                                            contient_autre_duree = True
+                                            break 
+                                    
+                                    if contient_autre_duree:
+                                        if duree_choisie != "peu importe" and (duree_choisie in texte_profond or duree_choisie.replace(" ", "") in texte_profond):
+                                            pass # Tolérance si la bonne durée est aussi là
+                                        else:
+                                            continue # REJETÉ ! L'annonce contient une mauvaise durée cachée dans le corps du texte.
+                                            
+                            except Exception:
+                                # Si la page refuse de s'ouvrir, on l'ignore par sécurité
+                                continue
                             
-                            # Extraction propre des infos pour l'affichage
+                            # Si l'annonce a survécu à l'analyse profonde, on la garde !
                             p_titre = annonce.find('p', class_=lambda c: c and 'tw-typo-l' in c)
                             p_entreprise = annonce.find('p', class_=lambda c: c and 'tw-typo-s' in c)
                             
                             titre = p_titre.text.strip() if p_titre else annonce.text.strip()
                             entreprise = p_entreprise.text.strip() if p_entreprise else "Non précisé"
-                            
-                            lien_complet = "https://www.hellowork.com" + lien_tag['href']
                             
                             if not any(offre['Lien'] == lien_complet for offre in offres_trouvees):
                                 offres_trouvees.append({
@@ -109,6 +121,7 @@ def lancer_recherche(criteres, sites):
                                     "Source": "HelloWork",
                                     "Lien": lien_complet
                                 })
+                                annonces_valides += 1
                                 
             except Exception as e:
                 st.error(f"Erreur technique sur {site} : {e}")
@@ -116,8 +129,7 @@ def lancer_recherche(criteres, sites):
         elif site == "Welcome to the Jungle":
             pass
 
-        time.sleep(1) 
-
+    zone_statut.update(label=f"Recherche terminée ! {len(offres_trouvees)} offres parfaites trouvées.", state="complete", expanded=False)
     return pd.DataFrame(offres_trouvees)
 
 
@@ -135,13 +147,15 @@ with st.sidebar:
     if st.button("🚀 Rafraîchir les offres", use_container_width=True, type="primary"):
         criteres = {"lieu": lieu, "rayon": rayon, "duree": duree, "secteur": secteur}
         
-        with st.spinner("Recherche et filtrage intraitable en cours... 🕵️‍♂️"):
-            st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
+        # Utilisation d'un composant de statut pour voir l'avancement du Deep Scraping
+        statut = st.status("Démarrage du radar...", expanded=True)
+        
+        st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles, statut)
             
         if not st.session_state.resultats.empty:
-            st.success(f"Bingo ! {len(st.session_state.resultats)} stages trouvés.")
+            st.success("Tableau mis à jour avec succès.")
         else:
-            st.warning("Aucun stage trouvé avec ces critères précis.")
+            st.warning("Aucun stage trouvé avec ces critères après l'analyse profonde.")
 
 # --- ZONE PRINCIPALE ---
 col1, col2 = st.columns([1, 2])
