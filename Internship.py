@@ -12,13 +12,13 @@ st.title("🎯 Radar à Stages")
 if 'sites_cibles' not in st.session_state:
     st.session_state.sites_cibles = pd.DataFrame({
         "Site": ["HelloWork", "Welcome to the Jungle", "LinkedIn"],
-        "Actif": [True, False, False] # Seul HelloWork est actif par défaut
+        "Actif": [True, False, False]
     })
 
 if 'resultats' not in st.session_state:
     st.session_state.resultats = pd.DataFrame()
 
-# --- LA FONCTION DE RECHERCHE (AVEC OUTILS DE DIAGNOSTIC) ---
+# --- LA FONCTION DE RECHERCHE ---
 def lancer_recherche(criteres, sites):
     offres_trouvees = []
     sites_actifs = sites[sites['Actif'] == True]['Site'].tolist()
@@ -34,50 +34,44 @@ def lancer_recherche(criteres, sites):
             url = f"https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot_cle}&l={lieu}&ray={criteres['rayon']}&ty=13"
             
             try:
-                # --- BLOC DE DIAGNOSTIC ---
-                st.info(f"🔍 URL cherchée : {url}")
-                
                 reponse = requests.get(url, headers=headers, timeout=10)
-                
-                st.write(f"📡 Code de réponse du serveur : {reponse.status_code}")
                 
                 if reponse.status_code == 200:
                     soup = BeautifulSoup(reponse.text, 'html.parser')
                     
                     annonces = soup.find_all('h3')
-                    st.write(f"🏷️ Nombre de balises <h3> trouvées : {len(annonces)}")
-                    
-                    # NOUVEAU MOUCHARD : On inspecte la première annonce trouvée
-                    if len(annonces) > 0:
-                        premiere_annonce = annonces[0]
-                        with st.expander("🧐 Cliquez ici pour voir le code HTML de la 1ère annonce trouvée !"):
-                            st.write("Code de la balise `<h3>` (Le titre) :")
-                            st.code(str(premiere_annonce))
-                            st.write("Code du 'Parent' (La boîte qui contient le `<h3>` et probablement le lien `<a>`) :")
-                            st.code(str(premiere_annonce.parent))
 
-                    # La boucle actuelle qui cherche le lien (qui ne fonctionne pas pour l'instant)
                     for annonce in annonces:
-                        lien_tag = annonce.find('a')
-                        if lien_tag and 'href' in lien_tag.attrs:
-                            titre = lien_tag.text.strip()
+                        # LE CORRECTIF EST ICI : On vérifie si le parent du <h3> est un lien <a>
+                        lien_tag = annonce.parent
+                        
+                        if lien_tag.name == 'a' and 'href' in lien_tag.attrs:
+                            
+                            # Extraction plus intelligente : on cherche les sous-balises <p>
+                            # Le titre a généralement la classe 'tw-typo-l' et l'entreprise 'tw-typo-s'
+                            p_titre = annonce.find('p', class_=lambda c: c and 'tw-typo-l' in c)
+                            p_entreprise = annonce.find('p', class_=lambda c: c and 'tw-typo-s' in c)
+                            
+                            titre = p_titre.text.strip() if p_titre else annonce.text.strip()
+                            entreprise = p_entreprise.text.strip() if p_entreprise else "Non précisé"
+                            
                             lien_complet = "https://www.hellowork.com" + lien_tag['href']
                             
-                            offres_trouvees.append({
-                                "Titre": titre,
-                                "Entreprise": "Non précisé",
-                                "Lieu": criteres['lieu'],
-                                "Source": "HelloWork",
-                                "Lien": lien_complet
-                            })
-                else:
-                    st.error(f"Le site a refusé la connexion. Code d'erreur HTTP : {reponse.status_code}")
-                # --- FIN DU BLOC DE DIAGNOSTIC ---
-                            
+                            # Sécurité anti-doublons (Le code HTML de HelloWork affiche parfois le h3 en double)
+                            if not any(offre['Lien'] == lien_complet for offre in offres_trouvees):
+                                offres_trouvees.append({
+                                    "Titre": titre,
+                                    "Entreprise": entreprise,
+                                    "Lieu": criteres['lieu'],
+                                    "Source": "HelloWork",
+                                    "Lien": lien_complet
+                                })
+                                
             except Exception as e:
                 st.error(f"Erreur technique sur {site} : {e}")
                 
         elif site == "Welcome to the Jungle":
+            # API Welcome to the jungle à coder plus tard
             pass
 
         time.sleep(1) 
@@ -99,10 +93,12 @@ with st.sidebar:
     if st.button("🚀 Rafraîchir les offres", use_container_width=True, type="primary"):
         criteres = {"lieu": lieu, "rayon": rayon, "duree": duree, "secteur": secteur}
         
-        st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
+        # On remet l'animation visuelle de chargement
+        with st.spinner("Recherche et extraction en cours... 🕵️‍♂️"):
+            st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
             
         if not st.session_state.resultats.empty:
-            st.success(f"{len(st.session_state.resultats)} offres trouvées !")
+            st.success(f"Bingo ! {len(st.session_state.resultats)} offres trouvées.")
         else:
             st.warning("Aucune offre trouvée avec ces critères.")
 
@@ -111,7 +107,7 @@ col1, col2 = st.columns([1, 2])
 
 with col1:
     st.subheader("🌐 Sites sources")
-    st.info("Coche les sites à fouiller. Actuellement, seul HelloWork est codé.")
+    st.info("Coche les sites à fouiller. (HelloWork = OK ✅)")
     st.session_state.sites_cibles = st.data_editor(
         st.session_state.sites_cibles, 
         num_rows="dynamic",
@@ -126,7 +122,7 @@ with col2:
         st.dataframe(
             st.session_state.resultats,
             column_config={
-                "Lien": st.column_config.LinkColumn("Lien vers l'offre (Clique ici)")
+                "Lien": st.column_config.LinkColumn("Postuler (Clique ici)")
             },
             hide_index=True,
             use_container_width=True
