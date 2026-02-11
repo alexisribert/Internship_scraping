@@ -27,9 +27,18 @@ def lancer_recherche(criteres, sites):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
+    # Liste des durées possibles pour générer notre "liste noire" d'exclusion
+    toutes_durees_possibles = ["2 mois", "4 mois", "6 mois", "césure", "cesure"]
+    duree_choisie = criteres['duree'].lower()
+    
+    # On crée la liste des mots à bannir si l'utilisateur a choisi une durée spécifique
+    mots_a_bannir = []
+    if duree_choisie != "peu importe":
+        mots_a_bannir = [d for d in toutes_durees_possibles if d != duree_choisie and d.replace('é', 'e') != duree_choisie.replace('é', 'e')]
+
     for site in sites_actifs:
         if site == "HelloWork":
-            # CORRECTIF 1 : On force le mot "Stage" et la durée directement dans les mots-clés
+            # On force le mot "Stage" et la durée directement dans les mots-clés
             mots_cles = f"Stage {criteres['secteur']}"
             if criteres['duree'] != "Peu importe":
                 mots_cles += f" {criteres['duree']}"
@@ -37,7 +46,6 @@ def lancer_recherche(criteres, sites):
             mot_cle_url = mots_cles.replace(' ', '+')
             lieu_url = criteres['lieu'].replace(' ', '+')
             
-            # On a retiré l'ancien paramètre défectueux et on laisse le moteur HelloWork chercher
             url = f"https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot_cle_url}&l={lieu_url}&ray={criteres['rayon']}"
             
             try:
@@ -52,13 +60,29 @@ def lancer_recherche(criteres, sites):
                         
                         if lien_tag.name == 'a' and 'href' in lien_tag.attrs:
                             
-                            # CORRECTIF 2 : Le filtre intraitable Anti-CDI
                             aria_label = lien_tag.get('aria-label', '').lower()
                             titre_brut = annonce.text.lower()
+                            texte_annonce = aria_label + " " + titre_brut
                             
-                            # Si le mot 'stage' ou 'intern' n'est ni dans le texte caché, ni dans le titre, on vire !
-                            if 'stage' not in aria_label and 'intern' not in aria_label and 'stage' not in titre_brut and 'intern' not in titre_brut:
+                            # CORRECTIF 2 : Le filtre intraitable Anti-CDI
+                            if 'stage' not in texte_annonce and 'intern' not in texte_annonce:
                                 continue 
+                            
+                            # CORRECTIF 3 : Le filtre d'exclusion intelligent
+                            contient_autre_duree = False
+                            for mot_banni in mots_a_bannir:
+                                if mot_banni in texte_annonce:
+                                    contient_autre_duree = True
+                                    break 
+                            
+                            # NOUVEAUTÉ : Si on trouve une autre durée, on vérifie si la nôtre y est AUSSI
+                            if contient_autre_duree:
+                                if duree_choisie != "peu importe" and duree_choisie in texte_annonce:
+                                    # Les deux durées sont présentes (ex: "Stage 4 à 6 mois"), on pardonne !
+                                    pass
+                                else:
+                                    # Seulement la mauvaise durée est présente, on rejette l'annonce
+                                    continue
                             
                             p_titre = annonce.find('p', class_=lambda c: c and 'tw-typo-l' in c)
                             p_entreprise = annonce.find('p', class_=lambda c: c and 'tw-typo-s' in c)
@@ -95,7 +119,6 @@ with st.sidebar:
     
     lieu = st.text_input("📍 Lieu", value="Lille")
     rayon = st.slider("📏 Rayon (en km)", min_value=0, max_value=50, value=30, step=5)
-    # J'ai ajouté plus d'options pour tester le fonctionnement
     duree = st.selectbox("⏱️ Durée du stage", ["Peu importe", "2 mois", "4 mois", "6 mois", "Césure"]) 
     secteur = st.text_input("🏢 Secteur / Mot-clé", value="Ingénieur")
     
@@ -104,7 +127,7 @@ with st.sidebar:
     if st.button("🚀 Rafraîchir les offres", use_container_width=True, type="primary"):
         criteres = {"lieu": lieu, "rayon": rayon, "duree": duree, "secteur": secteur}
         
-        with st.spinner("Recherche et filtrage strict en cours... 🕵️‍♂️"):
+        with st.spinner("Recherche et filtrage intelligent en cours... 🕵️‍♂️"):
             st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
             
         if not st.session_state.resultats.empty:
