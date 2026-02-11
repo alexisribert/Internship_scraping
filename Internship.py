@@ -1,73 +1,111 @@
-# Generated from: Internship.ipynb
-# Converted at: 2026-02-10T23:58:00.801Z
-# Next step (optional): refactor into modules & generate tests with RunCell
-# Quick start: pip install runcell
-
 import streamlit as st
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 import time
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Radar à Stages", page_icon="🎯", layout="wide")
 st.title("🎯 Radar à Stages")
 
-# --- INITIALISATION DES VARIABLES (Session State) ---
-# Cela permet de garder les données en mémoire entre chaque rafraîchissement de la page
+# --- INITIALISATION DES VARIABLES ---
 if 'sites_cibles' not in st.session_state:
     st.session_state.sites_cibles = pd.DataFrame({
-        "Site": ["Welcome to the Jungle", "LinkedIn", "HelloWork", "Indeed"],
-        "Actif": [True, True, True, False] # Case à cocher pour activer/désactiver
+        "Site": ["HelloWork", "Welcome to the Jungle", "LinkedIn"],
+        "Actif": [True, False, False] # Seul HelloWork est actif par défaut pour le test
     })
 
 if 'resultats' not in st.session_state:
     st.session_state.resultats = pd.DataFrame()
 
-# --- FONCTION DE RECHERCHE (Simulée) ---
+# --- LA FONCTION DE RECHERCHE (LE MOTEUR) ---
 def lancer_recherche(criteres, sites):
-    """
-    C'est ici que tu placeras ton vrai code de scraping ou d'API.
-    Pour l'instant, je simule une recherche pour te montrer le fonctionnement.
-    """
-    # On ne garde que les sites où "Actif" est True
+    offres_trouvees = []
     sites_actifs = sites[sites['Actif'] == True]['Site'].tolist()
     
-    # Simulation d'un temps de recherche...
-    with st.spinner(f"Recherche en cours sur {len(sites_actifs)} sites..."):
-        time.sleep(2) # Remplace ça par ton vrai code
-        
-        # Données fictives générées à partir de tes critères
-        donnees_trouvees = [
-            {"Titre": "Stage Data Scientist", "Entreprise": "TechCorp", "Lieu": criteres['lieu'], "Durée": criteres['duree'], "Source": "Welcome to the Jungle", "Lien": "https://lien..."},
-            {"Titre": f"Assistant(e) {criteres['secteur']}", "Entreprise": "InnovSect", "Lieu": f"À moins de {criteres['rayon']}km", "Durée": criteres['duree'], "Source": "LinkedIn", "Lien": "https://lien..."}
-        ]
-        return pd.DataFrame(donnees_trouvees)
+    # On imite un vrai navigateur web pour ne pas se faire bloquer immédiatement
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
+    for site in sites_actifs:
+        if site == "HelloWork":
+            # Construction de l'URL avec les critères
+            # Note : Sur HelloWork, ty=13 correspond au filtre "Stage"
+            mot_cle = criteres['secteur'].replace(' ', '+')
+            lieu = criteres['lieu'].replace(' ', '+')
+            url = f"https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot_cle}&l={lieu}&ray={criteres['rayon']}&ty=13"
+            
+            try:
+                reponse = requests.get(url, headers=headers, timeout=10)
+                # On vérifie que la page a bien répondu (Code 200 = OK)
+                if reponse.status_code == 200:
+                    soup = BeautifulSoup(reponse.text, 'html.parser')
+                    
+                    # On cherche toutes les balises <h3> qui contiennent généralement les titres des offres
+                    annonces = soup.find_all('h3')
+                    
+                    for annonce in annonces:
+                        lien_tag = annonce.find('a')
+                        if lien_tag and 'href' in lien_tag.attrs:
+                            titre = lien_tag.text.strip()
+                            # On recompose le lien complet
+                            lien_complet = "https://www.hellowork.com" + lien_tag['href']
+                            
+                            # On ajoute l'offre à notre liste
+                            offres_trouvees.append({
+                                "Titre": titre,
+                                "Entreprise": "Non précisé (voir lien)", # Nécessiterait une recherche plus fine dans le HTML
+                                "Lieu": criteres['lieu'],
+                                "Source": "HelloWork",
+                                "Lien": lien_complet
+                            })
+                            
+            except Exception as e:
+                st.error(f"Erreur lors de la recherche sur {site}: {e}")
+                
+        elif site == "Welcome to the Jungle":
+            # Espace prêt pour ajouter l'API Welcome to the Jungle ou un script Selenium plus tard
+            pass
+
+        # Petite pause pour ne pas surcharger les serveurs (Politesse web)
+        time.sleep(1) 
+
+    return pd.DataFrame(offres_trouvees)
+
 
 # --- BARRE LATÉRALE : CRITÈRES DE RECHERCHE ---
 with st.sidebar:
     st.header("⚙️ Critères de recherche")
     
     lieu = st.text_input("📍 Lieu", value="Paris")
-    rayon = st.slider("📏 Rayon (en km)", min_value=0, max_value=100, value=10, step=5)
-    duree = st.selectbox("⏱️ Durée du stage", ["4 mois", "6 mois", "Césure (1 an)"])
-    secteur = st.text_input("🏢 Secteur de l'entreprise", value="Intelligence Artificielle")
+    rayon = st.slider("📏 Rayon (en km)", min_value=0, max_value=50, value=15, step=5)
+    # La durée n'est pas toujours filtrable dans l'URL simplement, on la garde pour plus tard
+    duree = st.selectbox("⏱️ Durée du stage", ["Peu importe", "4 mois", "6 mois"]) 
+    secteur = st.text_input("🏢 Secteur / Mot-clé", value="Data")
     
     st.markdown("---")
     
-    # Bouton principal qui déclenche la recherche
     if st.button("🚀 Rafraîchir les offres", use_container_width=True, type="primary"):
         criteres = {"lieu": lieu, "rayon": rayon, "duree": duree, "secteur": secteur}
-        st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
+        
+        with st.spinner("Scraping en cours... Cela peut prendre quelques secondes."):
+            st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
+            
+        if not st.session_state.resultats.empty:
+            st.success(f"{len(st.session_state.resultats)} offres trouvées !")
+        else:
+            st.warning("Aucune offre trouvée avec ces critères.")
 
 # --- ZONE PRINCIPALE ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
     st.subheader("🌐 Sites sources")
-    st.info("Tu peux ajouter, modifier ou désactiver des sites directement dans ce tableau.")
-    # Le composant magique data_editor permet de modifier le tableau directement sur l'interface !
+    st.info("Coche les sites à fouiller. Actuellement, seul le moteur HelloWork est codé.")
     st.session_state.sites_cibles = st.data_editor(
         st.session_state.sites_cibles, 
-        num_rows="dynamic", # Permet d'ajouter/supprimer des lignes
+        num_rows="dynamic",
         use_container_width=True
     )
 
@@ -76,11 +114,11 @@ with col2:
     if st.session_state.resultats.empty:
         st.write("Aucune offre pour le moment. Remplis tes critères et clique sur 'Rafraîchir'.")
     else:
-        # Affichage des résultats
+        # Affichage interactif avec liens cliquables
         st.dataframe(
             st.session_state.resultats,
             column_config={
-                "Lien": st.column_config.LinkColumn("Lien vers l'offre") # Transforme l'URL en lien cliquable
+                "Lien": st.column_config.LinkColumn("Lien vers l'offre (Clique ici)")
             },
             hide_index=True,
             use_container_width=True
