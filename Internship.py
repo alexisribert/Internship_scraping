@@ -93,11 +93,11 @@ def lancer_recherche(criteres, sites):
 with st.sidebar:
     st.header("⚙️ Critères de recherche")
     
-    lieu = st.text_input("📍 Lieu", value="Paris")
-    rayon = st.slider("📏 Rayon (en km)", min_value=0, max_value=50, value=15, step=5)
+    lieu = st.text_input("📍 Lieu", value="Lille")
+    rayon = st.slider("📏 Rayon (en km)", min_value=0, max_value=50, value=30, step=5)
     # J'ai ajouté plus d'options pour tester le fonctionnement
     duree = st.selectbox("⏱️ Durée du stage", ["Peu importe", "2 mois", "4 mois", "6 mois", "Césure"]) 
-    secteur = st.text_input("🏢 Secteur / Mot-clé", value="Data")
+    secteur = st.text_input("🏢 Secteur / Mot-clé", value="Ingénieur")
     
     st.markdown("---")
     
