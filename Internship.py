@@ -29,26 +29,37 @@ def lancer_recherche(criteres, sites):
 
     for site in sites_actifs:
         if site == "HelloWork":
-            mot_cle = criteres['secteur'].replace(' ', '+')
-            lieu = criteres['lieu'].replace(' ', '+')
-            url = f"https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot_cle}&l={lieu}&ray={criteres['rayon']}&ty=13"
+            # CORRECTIF 1 : On force le mot "Stage" et la durée directement dans les mots-clés
+            mots_cles = f"Stage {criteres['secteur']}"
+            if criteres['duree'] != "Peu importe":
+                mots_cles += f" {criteres['duree']}"
+                
+            mot_cle_url = mots_cles.replace(' ', '+')
+            lieu_url = criteres['lieu'].replace(' ', '+')
+            
+            # On a retiré l'ancien paramètre défectueux et on laisse le moteur HelloWork chercher
+            url = f"https://www.hellowork.com/fr-fr/emploi/recherche.html?k={mot_cle_url}&l={lieu_url}&ray={criteres['rayon']}"
             
             try:
                 reponse = requests.get(url, headers=headers, timeout=10)
                 
                 if reponse.status_code == 200:
                     soup = BeautifulSoup(reponse.text, 'html.parser')
-                    
                     annonces = soup.find_all('h3')
 
                     for annonce in annonces:
-                        # LE CORRECTIF EST ICI : On vérifie si le parent du <h3> est un lien <a>
                         lien_tag = annonce.parent
                         
                         if lien_tag.name == 'a' and 'href' in lien_tag.attrs:
                             
-                            # Extraction plus intelligente : on cherche les sous-balises <p>
-                            # Le titre a généralement la classe 'tw-typo-l' et l'entreprise 'tw-typo-s'
+                            # CORRECTIF 2 : Le filtre intraitable Anti-CDI
+                            aria_label = lien_tag.get('aria-label', '').lower()
+                            titre_brut = annonce.text.lower()
+                            
+                            # Si le mot 'stage' ou 'intern' n'est ni dans le texte caché, ni dans le titre, on vire !
+                            if 'stage' not in aria_label and 'intern' not in aria_label and 'stage' not in titre_brut and 'intern' not in titre_brut:
+                                continue 
+                            
                             p_titre = annonce.find('p', class_=lambda c: c and 'tw-typo-l' in c)
                             p_entreprise = annonce.find('p', class_=lambda c: c and 'tw-typo-s' in c)
                             
@@ -57,12 +68,12 @@ def lancer_recherche(criteres, sites):
                             
                             lien_complet = "https://www.hellowork.com" + lien_tag['href']
                             
-                            # Sécurité anti-doublons (Le code HTML de HelloWork affiche parfois le h3 en double)
                             if not any(offre['Lien'] == lien_complet for offre in offres_trouvees):
                                 offres_trouvees.append({
                                     "Titre": titre,
                                     "Entreprise": entreprise,
                                     "Lieu": criteres['lieu'],
+                                    "Durée": criteres['duree'] if criteres['duree'] != "Peu importe" else "Non filtrée",
                                     "Source": "HelloWork",
                                     "Lien": lien_complet
                                 })
@@ -71,7 +82,6 @@ def lancer_recherche(criteres, sites):
                 st.error(f"Erreur technique sur {site} : {e}")
                 
         elif site == "Welcome to the Jungle":
-            # API Welcome to the jungle à coder plus tard
             pass
 
         time.sleep(1) 
@@ -85,7 +95,8 @@ with st.sidebar:
     
     lieu = st.text_input("📍 Lieu", value="Paris")
     rayon = st.slider("📏 Rayon (en km)", min_value=0, max_value=50, value=15, step=5)
-    duree = st.selectbox("⏱️ Durée du stage", ["Peu importe", "4 mois", "6 mois"]) 
+    # J'ai ajouté plus d'options pour tester le fonctionnement
+    duree = st.selectbox("⏱️ Durée du stage", ["Peu importe", "2 mois", "4 mois", "6 mois", "Césure"]) 
     secteur = st.text_input("🏢 Secteur / Mot-clé", value="Data")
     
     st.markdown("---")
@@ -93,14 +104,13 @@ with st.sidebar:
     if st.button("🚀 Rafraîchir les offres", use_container_width=True, type="primary"):
         criteres = {"lieu": lieu, "rayon": rayon, "duree": duree, "secteur": secteur}
         
-        # On remet l'animation visuelle de chargement
-        with st.spinner("Recherche et extraction en cours... 🕵️‍♂️"):
+        with st.spinner("Recherche et filtrage strict en cours... 🕵️‍♂️"):
             st.session_state.resultats = lancer_recherche(criteres, st.session_state.sites_cibles)
             
         if not st.session_state.resultats.empty:
-            st.success(f"Bingo ! {len(st.session_state.resultats)} offres trouvées.")
+            st.success(f"Bingo ! {len(st.session_state.resultats)} stages trouvés.")
         else:
-            st.warning("Aucune offre trouvée avec ces critères.")
+            st.warning("Aucun stage trouvé avec ces critères précis.")
 
 # --- ZONE PRINCIPALE ---
 col1, col2 = st.columns([1, 2])
